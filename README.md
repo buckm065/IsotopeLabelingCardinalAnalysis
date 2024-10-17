@@ -1,3 +1,3 @@
 # MSI-Analysis
 
-For diagnosis of error in Cardinal's SSC algorithm
+Utilization of Cardinal v.3 for rapid and robust analysis of in vivo isotope labeling of duckweed metabolites. Here, we employ several of the built-in capabilities of Cardinal to extract isotopologue distributions in various regions of fractured duckweed samples.
