@@ -1,0 +1,454 @@
+---
+title: "Analysis of in vivo Isotope Labeled Duckweed"
+author: "Raven L B Johnson"
+date: "2025-02-25"
+output:   
+  BiocStyle::html_document:
+  toc: true
+vignette: >
+  %\VignetteIndexEntry{Analysis of in vivo Isotope Labeled Duckweed}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r style, echo=FALSE, results='asis'}
+BiocStyle::markdown()
+```
+
+```{r setup, , echo=FALSE, message=FALSE}
+library(Cardinal)
+setwd("/work/LAS/yjlee-lab/buckm065/Project1_Labeling")
+```
+
+## Unlabeled Duckweed Analysis
+
+Normalization and processing is important for consistent MSIi analysis. Here, we import the imzML file and perform TIC normalization and peak binning. We sum to intensities in the pixels to create a TIC image and average the intensities for each m/z value to produce an average mass spectrum for the entire MSI dataset.
+
+```{r}
+# import
+cntrl <- readMSIData("0A.imzML")
+
+# normalize and bin at 3 mDa
+cntrl_normAlign <- cntrl |>
+  normalize(method="tic") |>
+  peakProcess(tolerance=0.003, units="mz")
+
+# calculate TIC and mean spectrum
+cntrl_normAlign <- cntrl_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+
+Below we plot the TIC and mean spectrum.
+
+```{r image-cntrl_tic, fig.height=4, fig.width=6}
+image(cntrl_normAlign,"TIC", col=matter::cpal("Cividis"), enhance="hist")
+```
+
+```{r image-cntrl_mean, fig.height=5, fig.width=9}
+plot(cntrl_normAlign, "Mean", annPeaks=3)
+```
+
+We can perform spatial shrunken centroid segmentation on the unlabeled duckweed imaging dataset.
+
+```{r}
+cntrl_nobkgrem <- spatialShrunkenCentroids(cntrl_normAlign, 
+                                           r = 1, s=2^(1:5), k = 5,
+                                           weights = "gaussian")
+cntrl_nobkgrem
+```
+
+Below, we plot the results of the SSC segmentation without the removal of the tape background.
+
+```{r image-cntrl_seg_bkgd, fig.height=4, fig.width=9}
+image(cntrl_nobkgrem, i=1:5, key=TRUE, select=c(5,3,2,1,4), 
+      col=c("#B07AA1","#59A14E","#76B7B2","#4F7AA8","#F59AA5"))
+```
+
+```{r image-cntrl_regions, fig.height=4, fig.width=6}
+cntrl_bkgdrem <- spatialShrunkenCentroids(cntrl_normAlign, 
+                                          r = 3, s=16,k=2, weights = "gaussian")
+image(cntrl_bkgdrem)
+cntrl_normAlign$regions <- makeFactor(
+  tissue = (cntrl_bkgdrem@model[["class"]]==2), 
+  bkgd = (cntrl_bkgdrem@model[["class"]]==1))
+image(cntrl_normAlign, "regions")
+```
+
+```{r image-cntrl_bkgd_mean, fig.height=5, fig.width=9}
+# subset the background pixels
+cntrl_bkgd <- subsetPixels(cntrl_normAlign, regions=="bkgd")
+
+# calculate the TIC and mean spectrum
+cntrl_bkgd <- cntrl_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(cntrl_bkgd, "Mean", annPeaks=3)
+```
+
+```{r image-cntrl_tissue_mean, fig.height=5, fig.width=9}
+# subset the non-background pixels
+cntrl_tissue <- subsetPixels(cntrl_normAlign, regions!="bkgd")
+
+# calculate the TIC and mean spectrum for the non-background pixels
+cntrl_tissue <-cntrl_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(cntrl_tissue, "Mean", annPeaks=3)
+```
+
+```{r image-cntrl_tissue_ssc, fig.height=4, fig.width=9}
+# SSC segmentation of tissue-only region
+cntrl_ssc_tissue <- spatialShrunkenCentroids(cntrl_tissue, r=1, s= 2^(1:5),k=4, 
+                                            weights = "adaptive")
+# plot all models
+image(cntrl_ssc_tissue, i=1:5, key=FALSE, select=c(3,4,2,1),
+      col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+```{r image-cntrl_mdl3, fig.height=4, fig.width=9}
+# select s = 8 model
+cntrl_ssc_tissue_Mdl3 <- cntrl_ssc_tissue[[3]]
+
+# segmentation
+image(cntrl_ssc_tissue_Mdl3, key=FALSE, select = c(3,4,2,1),
+      col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+```{r image-cntrl_tstat, fig.height=4, fig.width=9}
+# t-statistics
+plot(cntrl_ssc_tissue_Mdl3, type="statistic", key=FALSE, 
+     scale=TRUE, lwd=2,select = c(3,4,2,1),
+     col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+```{r image-cntrl_cent, fig.height=4, fig.width=9}
+# shrunken centroids
+plot(cntrl_ssc_tissue_Mdl3, type="centers", key=FALSE, 
+     scale=TRUE, lwd=2,select = c(3,4,2,1),
+     col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+```{r image-cntrl_anat, fig.height=4, fig.width=6}
+# create a factor for each segment
+cntrl_tissue$anatomy <- makeFactor(
+  tissueEdge = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 3),
+  outerParent = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 4),
+  Daughter = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 2),
+  buddingPouch = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 1))
+
+# plot the segments
+image(cntrl_tissue, "anatomy",
+      col=c("#59A14E","#76B7B2","#F28E27","#B07AA1"))
+```
+
+```{r image-cntrl_ions_top, fig.height=4, fig.width=9}
+# subset the top features from the model
+cntrl_top <- topFeatures(cntrl_ssc_tissue_Mdl3)
+
+# plot one ion image for each segment
+image(cntrl_tissue, mz=c(483.069,212.843, 465.023,348.868), 
+      tolerance=0.002, units="mz", enhance="hist",scale=TRUE,
+      col=matter::cpal("Cividis"))
+```
+
+```{rimage-cntrl_ions_phosphate, fig.height=4, fig.width=9}
+image(cntrl_tissue, mz=c(348.868, 212.852), 
+      tolerance=0.002, units="mz", enhance="hist",scale=TRUE,
+      col=matter::cpal("Cividis"))
+```
+
+## Two-Day 13C-Labeled Duckweed
+
+```{r image-two_mean, fig.height=5, fig.width=9}
+twoA <- readMSIData("2dayA_13C_Realigned.imzML")
+centroided(twoA) <- FALSE
+
+twoA_normAlign <- twoA |>
+  normalize(method="tic") |>
+  peakProcess(tolerance=0.002, units="mz")
+twoA_normAlign <- twoA_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(twoA_normAlign, "Mean", annPeaks=3)
+```
+
+```{r image-two_regions, fig.height=4, fig.width=6}
+twoA_bkgdrem <- spatialShrunkenCentroids(twoA_normAlign, r = 3, s=0,k=3, 
+                                         weights = "gaussian")
+twoA_normAlign$regions <- makeFactor(
+  tissue = (twoA_bkgdrem@model[["class"]]!=3),
+  bkgd = (twoA_bkgdrem@model[["class"]]==3))
+
+image(twoA_normAlign, "regions")
+```
+
+```{r image-two_bkgd_mean, fig.height=5, fig.width=9}
+twoA_bkgd <- subsetPixels(twoA_normAlign, regions=="bkgd")
+twoA_bkgd <- twoA_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(twoA_bkgd, "Mean", annPeaks=3)
+```
+
+```{r image-two_tissue_mean, fig.height=4, fig.width=9}
+twoA_tissue <- subsetPixels(twoA_normAlign, regions!="bkgd")
+twoA_tissue <- twoA_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(twoA_tissue, "Mean", annPeaks=2)
+```
+
+```{r image-two_ssc, fig.height=4, fig.width=9}
+twoA_ssc_tissue <- spatialShrunkenCentroids(twoA_tissue, r = 1, s= 2^(0:5),k=4, 
+                                            weights = "gaussian")
+twoA_ssc_tissue
+image(twoA_ssc_tissue, i=c(1:6), col=c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+```{r image-two_mdl4, fig.height=4, fig.width=6}
+twoA_ssc_tissue_Mdl4 <- twoA_ssc_tissue[[4]]
+image(twoA_ssc_tissue_Mdl4, key=FALSE,
+      col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+```{r image-two_tstat, fig.height=4, fig.width=9}
+plot(twoA_ssc_tissue_Mdl4, type="statistic", key=FALSE, scale=TRUE, 
+     lwd=2, col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+```{r image-two_cent, fig.height=4, fig.width=9}
+plot(twoA_ssc_tissue_Mdl4, type="centers", key=FALSE, scale=TRUE, 
+     lwd=2, col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+```{r image-two_anat, fig.height=4, fig.width=6}
+twoA_top <- topFeatures(twoA_ssc_tissue_Mdl4)
+twoA_tissue$anatomy <- makeFactor(
+  tissueEdge = (twoA_ssc_tissue_Mdl4@model[["class"]] == 3),
+  Daughter = (twoA_ssc_tissue_Mdl4@model[["class"]] == 1),
+  innerParent = (twoA_ssc_tissue_Mdl4@model[["class"]] == 2),
+  outerParent = twoA_ssc_tissue_Mdl4@model[["class"]] == 4)
+image(twoA_tissue, "anatomy",
+      col=c("#59A14E","#F28E27","#E05759","#76B7B2"))
+```
+
+## Three-Day 13C-Labeled Duckweed
+
+```{r iamge-three_mean, fig.height=4, fig.width=9}
+threeC <-readMSIData("3dayC_13C_Realigned.imzML")
+centroided(threeC) <- FALSE
+
+threeC_normAlign <- threeC |>
+  normalize(method="tic") |> #TIC Normalization
+  peakProcess(tolerance=0.002, units="mz")
+
+threeC_normAlign<- threeC_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(threeC_normAlign, "Mean", annPeaks=3)
+```
+
+```{r image-three_TIC, fig.height=4, fig.width=6}
+image(threeC_normAlign, "TIC", enhance="hist",col=matter::cpal("Cividis"))
+```
+
+```{r image-three_regions, fig.height=4, fig.width=6}
+threeC_bkgdrem <- spatialShrunkenCentroids(threeC_normAlign, r = 2, s= 8,k=3, 
+                                           weights = "gaussian")
+
+threeC_normAlign$regions <- makeFactor(
+  tissue = (threeC_bkgdrem@model[["class"]]!=1),
+  bkgd = (threeC_bkgdrem@model[["class"]]==1))
+
+image(threeC_normAlign, "regions")
+```
+
+```{r image-three_bkgd_mean, fig.height=5, fig.width=9}
+threeC_bkgd <- subsetPixels(threeC_normAlign, regions == "bkgd")
+
+threeC_bkgd <- threeC_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(threeC_bkgd, "Mean", annPeaks=4)
+```
+
+```{r image-three_tissue_mean, fig.height=5, fig.width=9}
+threeC_tissue <- subsetPixels(threeC_normAlign, regions == "tissue")
+
+threeC_tissue <- threeC_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(threeC_tissue, "Mean", annPeaks=2)
+```
+
+```{r image- three_ssc, fig.height=4, fig.width=9}
+threeC_ssc_tissue <- spatialShrunkenCentroids(threeC_tissue, 
+                                              r=2, k = 5, s= 2^(0:5), 
+                                              weights="gaussian")
+image(threeC_ssc_tissue, i = 1:6, key=FALSE, 
+      col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+```{r image-three_tstat, fig.height=4, fig.width=9}
+threeC_ssc_tissue_Mdl4 <- threeC_ssc_tissue[[4]]
+plot(threeC_ssc_tissue_Mdl4, type = "statistic", lwd = 2, key=FALSE, 
+     col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+```{r image-three_cent, fig.height=4, fig.width=9}
+plot(threeC_ssc_tissue_Mdl4, type = "centers", lwd = 2, scale = TRUE, key=FALSE, 
+     col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+```{r image-three_anat, fig.height=4, fig.width=6}
+threeC_top <- topFeatures(threeC_ssc_tissue_Mdl4)
+
+threeC_tissue$anatomy <- makeFactor(
+  innerDaughter = (threeC_ssc_tissue_Mdl4@model[["class"]] == 3),
+  outerDaughter = (threeC_ssc_tissue_Mdl4@model[["class"]] == 4),
+  innerParent = (threeC_ssc_tissue_Mdl4@model[["class"]] == 1),
+  buddingPouch = (threeC_ssc_tissue_Mdl4@model[["class"]] == 5),
+  outerParent = threeC_ssc_tissue_Mdl4@model[["class"]] == 2)
+image(threeC_tissue, "anatomy",
+      col=c("#F28E27","#EDC947","#E05759","#B07AA1","#76B7B2"))
+
+```
+
+## Five-Day D-Labeled Duckweed
+
+```{r image- five_mean, fig.height=5, fig.width=9}
+fiveB <-readMSIData("5dayB_2H.imzML")
+
+fiveB_normAlign<- fiveB|>
+  normalize(method="tic") |> #TIC Normalization
+  peakProcess(tolerance=0.002, units="mz", filterFreq = 0)
+
+fiveB_normAlign <- fiveB_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_normAlign, "Mean", annPeaks = 2)
+```
+
+```{r image-five_TIC, fig.height=4, fig.width=6}
+image(fiveB_normAlign, "TIC", enhance="hist", col=matter::cpal("Cividis"))
+```
+
+### Lipid Analysis
+
+```{r image-five_lip_mean, fig.height=5, fig.width=9}
+fiveB_lipids <- subsetFeatures(fiveB_normAlign,800 < mz, mz < 1200)
+fiveB_lipids <- normalize(fiveB_lipids, method="tic")|>
+  process()
+
+fiveB_lipids <- fiveB_lipids |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(fiveB_lipids, "Mean", annPeaks = 2)
+```
+
+```{r image-five_lip_regions, fig.height=4, fig.width=6}
+fiveB_lipids_ssc <- spatialShrunkenCentroids(fiveB_lipids, r = 2, 
+                                                s = 0, k = 2)
+fiveB_lipids_ssc
+fiveB_lipids$regions <- makeFactor(tissue = (fiveB_lipids_ssc@model[["class"]]!=1),
+                                  bkgd = (fiveB_lipids_ssc@model[["class"]]==1))
+image(fiveB_lipids,"regions")
+```
+
+```{r image-five_bkgd_mean, fig.height=5, fig.width=9}
+fiveB_bkgd_lipids <- subsetPixels(fiveB_lipids, regions == "bkgd")
+fiveB_bkgd_lipids <- fiveB_bkgd_lipids |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_bkgd_lipids, "Mean", annPeaks = 2)
+```
+
+```{r image-five_lip_tstat, fig.height=4, fig.width=6}
+fiveB_tissue_lipids <- subsetPixels(fiveB_lipids, regions == "tissue")
+fiveB_tissue_lipids_ssc <- spatialShrunkenCentroids(fiveB_tissue_lipids, r=3, 
+                                            k = 2, s=8, 
+                                            weights="gaussian")
+fiveB_lipid_top <- topFeatures(fiveB_tissue_lipids_ssc)
+plot(fiveB_tissue_lipids_ssc, type="statistic",lwd = 2,
+     col=c("#76B7B2","#F28E27"), key = FALSE)
+```
+
+```{r image-five_lip_cent, fig.height=4, fig.width=6}
+plot(fiveB_tissue_lipids_ssc, type="centers",lwd = 2,
+     col=c("#76B7B2","#F28E27"), key =FALSE)
+```
+
+```{r image-five_lip_anat, fig.height=4, fig.width=6}
+fiveB_tissue_lipids$anatomy <- makeFactor(
+  Parent = (fiveB_tissue_lipids_ssc@model[["class"]] == 1),
+  Daughter = (fiveB_tissue_lipids_ssc@model[["class"]] == 2))
+image(fiveB_tissue_lipids, "anatomy", col=c("#76B7B2","#F28E27"))
+```
+
+### Whole Mass Range Analysis
+
+```{r image-five_bkgd_mean, fig.height=5, fig.width=9}
+fiveB_normAlign$regions <- makeFactor(tissue = (fiveB_tissue_lipids_ssc@model[["class"]]!=1),
+                                  bkgd = (fiveB_tissue_lipids_ssc@model[["class"]]==1))
+
+fiveB_tissue <- subsetPixels(fiveB_normAlign, regions == "tissue")
+fiveB_bkgd <- subsetPixels(fiveB_normAlign, regions == "bkgd")
+
+fiveB_bkgd <- fiveB_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_bkgd, "Mean", annPeaks = 2)
+```
+
+```{r image-five_tissue_mean, fig.height=4, fig.width=9}
+fiveB_tissue <- fiveB_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_tissue, "Mean", annPeaks = 1)
+```
+
+```{r image-five_tissue_ssc, fig.height=4, fig.width=9}
+fiveB_tissue_ssc <- spatialShrunkenCentroids(fiveB_tissue, r=3, k=5, s=2^(0:5), 
+                                             weights="adaptive")
+image(fiveB_tissue_ssc, i = 1:6, 
+      col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27"))
+```
+
+```{r image-five_tstat, fig.height=4, fig.width=9}
+fiveB_tissue_Mdl4 <- fiveB_tissue_ssc[[4]]
+fiveB_tissue_top <- topFeatures(fiveB_tissue_Mdl4)
+
+plot(fiveB_tissue_Mdl4, type="statistic", lwd = 2, key = FALSE, 
+     col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27") )
+```
+
+```{r image-five_cent, fig.height=4, fig.width=9}
+plot(fiveB_tissue_Mdl4, type="centers", lwd = 2, key = FALSE, 
+     col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27") )
+```
+
+```{r image-five_anat, fig.height=4, fig.width=6}
+fiveB_tissue$anatomy <- makeFactor(
+  tissueEdge = (fiveB_tissue_Mdl4@model[["class"]] == 1),
+  outerParent = (fiveB_tissue_Mdl4@model[["class"]] == 2),
+  buddingPouch = (fiveB_tissue_Mdl4@model[["class"]] == 3),
+  innerParent = (fiveB_tissue_Mdl4@model[["class"]] == 4),
+  Daughter = (fiveB_tissue_Mdl4@model[["class"]] == 5))
+image(fiveB_tissue, "anatomy",
+      col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27"))
+```
+
+## Session information
+
+```{r}
+sessionInfo()
+```
