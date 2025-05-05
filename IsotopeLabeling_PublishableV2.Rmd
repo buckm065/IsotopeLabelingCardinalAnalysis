@@ -1,0 +1,555 @@
+---
+title: "Analysis of in vivo Isotope Labeled Duckweed"
+author: "Raven L B Johnson"
+date: "2025-05-05"
+output:   
+  BiocStyle::html_document:
+  toc: true
+vignette: >
+  %\VignetteIndexEntry{Analysis of in vivo Isotope Labeled Duckweed}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r style, echo=FALSE, results='asis'}
+BiocStyle::markdown()
+```
+
+```{r setup, echo=FALSE, message=FALSE}
+library(Cardinal)
+setwd("/work/LAS/yjlee-lab/buckm065/Project1_Labeling")
+load("/work/LAS/yjlee-lab/buckm065/Project1_Labeling/IsotopeLabeling_Data_Updated.RData")
+```
+
+## Unlabeled Duckweed Analysis
+
+Normalization and processing is important for consistent MSIi analysis. Here, we import the imzML file of unlabeled duckweed then perform TIC normalization and peak binning. We create a TIC image and average the intensities for each m/z value to produce an average mass spectrum for the entire MSI dataset.
+
+```{r eval=FALSE}
+cntrl <- readMSIData("0A.imzML")
+
+cntrl_normAlign <- cntrl |>
+  normalize(method="tic") |>
+  peakProcess(tolerance=0.003, units="mz")
+
+cntrl_normAlign <- cntrl_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+
+Below we plot the TIC and mean spectrum, respectively.
+```{r image-cntrl_tic, fig.height=4, fig.width=6, cache = TRUE}
+image(cntrl_normAlign,"TIC", col=matter::cpal("Cividis"), enhance="hist")
+```
+
+```{r image-cntrl_mean, fig.height=5, fig.width=9, cache = TRUE}
+plot(cntrl_normAlign, "Mean", annPeaks=6)
+```
+It should be noted that m/z 273.0397, 313.0323, and 329.0062 are DHB related peaks. Additionally, m/z 553.3699 and 569.4336 are tape related peaks. Finally, m/z 381.0798 is a disaccharide ([C12H22O11+K]+). 
+
+Spatial shrunken centroid (SSC) segmentation can be utilized to investigate different regions of the mass spectrometry image. By setting r=1, k=5, and varying the value of s, we can observe differences in signal intensity throughout the image in a statistically robust manner. Here, we show an example of SSC segmentation of the entire image.
+```{r, eval=FALSE}
+cntrl_nobkgrem <- spatialShrunkenCentroids(cntrl_normAlign, 
+                                           r = 1,k = 5, s=2^(1:5), 
+                                           weights = "gaussian")
+```
+From the summary table below, we can compare the performance of the models by examining the sparsity, the AIC, and BIC values presented. AIC and BIC values can be compared to the lowest values of their respective column. Generally, the best models are acheived when AIC and BIC values are low and the sparsity is high. All three metrics suggest that the s=32 model is performing the best. However, using a shrinkage parameter of 32 would not be suitable for low intensity analytes to be preserved for later comparison to isotope labeling. Therefore, as an example, we select the s=8 model throughout the remainder of this script as the "good" model. 
+```{r, cache=TRUE}
+cntrl_nobkgrem
+```
+
+While SSC segmentation is able to pick out the tissue from the tape, further segmentation of the tape background is also being performed (the pink and blue areas of the image). 
+```{r image-cntrl_seg_bkgd, fig.height=4, fig.width=9,cache = TRUE}
+image(cntrl_nobkgrem, i=1:5, select=c(4, 5, 2,3,1), col=c("#B07AA1","#59A14E","#76B7B2","#4F7AA8","#F59AA5"))
+```
+By comparing the shrunken centroids between the two background segments, we can observe the these differences are mostly in matrix peak intensities, which can also be observed in the TIC image shown earlier. 
+```{r centers-cntrl_seg_bkgd, fig.height=6, fig.width=9,cache = TRUE}
+plot(cntrl_nobkgrem, type="centers",i=3, select=c(4, 5), 
+     col=c("#4F7AA8","#F59AA5"),lwd=2, key=FALSE)
+```
+Due to the additional segmentation in the background, we experiment with increasing the maximum number of clusters to 6 and 7. As we increase k, we expect that more segments will be revealed within the tissue region rather than the tape background.
+
+Below, we show SSC segmentation with k = 6. 
+```{r image-cntrl_seg_bkgd_k6, fig.height=4, fig.width=9,cache = TRUE}
+image(cntrl_nobkgrem_k6, select=c(6,3,4,5,2,1), col=c("#B07AA1","#76B7B2","#F59AA5","#EDC947","#59A14E","#4F7AA8"))
+```
+A comparison of the centroids shows that the blue and pink regions are, once again, differences in matrix intensities. However, the yellow region begins to show different matix adduct formation (m/z 313.0323 is [2DHB-H2O+Na]+ and 329.0062 is [2DHB-H2O+K]+) as the segments get closer in proximity to the duckweed tissue. This shift in adduct formation is expected as the abundance of K+ in the tissue-regions are much higher than in the tape. 
+```{r centers-cntrl_seg_bkgd_k6, fig.height=7, fig.width=9,cache = TRUE}
+plot(cntrl_nobkgrem_k6,type="centers", key=FALSE, select=c(6,3,4),superpose=FALSE, col=c("#B07AA1","#76B7B2","#F59AA5","#EDC947","#59A14E","#4F7AA8"), annPeaks=3,
+     layout=c(3,1))
+```
+When k = 7, a new segment appears over the intermediate and daughter frond regions of the duckweed plant, shown in orange.  
+```{r image-cntrl_seg_bkgd_k7, fig.height=4, fig.width=9,cache = TRUE}
+image(cntrl_nobkgrem_k7, select=c(2,4,6,3,7,5,1), col=c("#B07AA1","#4F7AA8","#59A14E","#EDC947","#76B7B2","#F59AA5","#F28E27"))
+```
+All major peaks between m/z 310 and 370 are various matrix related peaks, the prominent peaks at m/z 553 and 569 are tape related. As mentioned previously, m/z 381.0798 is disaccharide. However, as was not previously discussed, the peak at m/z 813.4919 can be attributed to monogalactosyldiacylglycerol 36:6 (MGDG 36:6). Between the orange and cyan segments, differences in matrix peak compositions and metabolite intensities are the most observable differences. The purple region, which is consistent throughout the examples shown thus far, is attributed to the budding pouch region of the plant and analyte signatures in the region differ quite dramatically from the other regions of interest. 
+```{r centers-cntrl_seg_bkgd_k7, fig.height=4, fig.width=9,cache = TRUE}
+plot(cntrl_nobkgrem_k7,type="centers", key=FALSE, select=c(3,7,5,1), col=c("#B07AA1","#4F7AA8","#59A14E","#EDC947","#76B7B2","#F59AA5","#F28E27"),
+     superpose=FALSE, layout=c(4,1), annPeaks=6)
+```
+
+To focus the investigation on comparing and contrasting the various regions of the duckweed tissue, SSC segmentation can be used to separate the tape background from the tissue.
+```{r, eval = FALSE}
+cntrl_bkgdrem <- spatialShrunkenCentroids(cntrl_normAlign, 
+                                          r = 3, k=2, s=16, weights = "gaussian")
+cntrl_normAlign$regions <- makeFactor(
+  tissue = (cntrl_bkgdrem@model[["class"]]==1), 
+  bkgd = (cntrl_bkgdrem@model[["class"]]==2))
+```
+```{r image-cntrl_regions, cache = TRUE, fig.height=4, fig.width=6}
+image(cntrl_normAlign, "regions")
+```
+
+The  mean spectrum for tape background is shown below.
+```{r image-cntrl_bkgd_mean, fig.height=5, fig.width=9,cache = TRUE}
+cntrl_bkgd <- subsetPixels(cntrl_normAlign, regions=="bkgd")
+
+cntrl_bkgd <- cntrl_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(cntrl_bkgd, "Mean", annPeaks=5)
+```
+
+The mean spectrum for tissue is shown below.
+```{r image-cntrl_tissue_mean, fig.height=5, fig.width=9,cache = TRUE}
+cntrl_tissue <- subsetPixels(cntrl_normAlign, regions!="bkgd")
+
+cntrl_tissue <- cntrl_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(cntrl_tissue, "Mean", annPeaks=5)
+```
+
+Performing SSC segmentation of the tissue-only region revealed the same four segments as those shown in the k=7 model example. We consider these regions to be: the outer parent (cyan), intermediate/daughter region (orange), the budding pouch (purple), and tissue edge (green).
+```{r ,eval = FALSE}
+cntrl_ssc_tissue <- spatialShrunkenCentroids(cntrl_tissue, r=1, k=4, s= 2^(1:5), 
+                                            weights = "adaptive")
+```
+```{r image-cntrl_tissue_ssc, fig.height=6, fig.width=9, cache=TRUE}
+image(cntrl_ssc_tissue, i=1:5, key=FALSE, select=c(3,4,2,1),
+      col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+We select the model with s = 8 as an example.
+```{r image-cntrl_mdl3, fig.height=4, fig.width=9,cache = TRUE}
+cntrl_ssc_tissue_Mdl3 <- cntrl_ssc_tissue[[3]]
+```
+
+The t-statistics for this model show distinct differences in features across the four segments. 
+```{r image-cntrl_tstat, fig.height=6, fig.width=9,cache = TRUE}
+plot(cntrl_ssc_tissue_Mdl3, type="statistic", key=FALSE, 
+     scale=TRUE, lwd=2, select = c(3,4,2,1),
+     col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"), annPeaks = 1)
+```
+
+The shrunken centroids allow for a comparison of scaled mean mass spectra from each segment for a more direct comparison of the differences in analyte intensities.
+```{r image-cntrl_cent, fig.height=6, fig.width=9,cache = TRUE}
+plot(cntrl_ssc_tissue_Mdl3, type="centers", key=FALSE, 
+     scale=TRUE, lwd=2,select = c(3,4,2,1),
+     col=c("#B07AA1","#F28E27","#59A14E","#76B7B2"))
+```
+
+We are then able to define the regions and plot them with annotations.
+```{r image-cntrl_anat, fig.height=4, fig.width=6,cache = TRUE}
+cntrl_tissue$anatomy <- makeFactor(
+  tissueEdge = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 3),
+  outerParent = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 4),
+  Daughter = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 2),
+  buddingPouch = (cntrl_ssc_tissue_Mdl3@model[["class"]] == 1))
+
+image(cntrl_tissue, "anatomy",
+      col=c("#59A14E","#76B7B2","#F28E27","#B07AA1"))
+```
+
+Here, we extract the ranked t-statistics in each regions from the s = 8 model.
+```{r,cache = TRUE}
+cntrl_top <- topFeatures(cntrl_ssc_tissue_Mdl3)
+subset(cntrl_top, class==1)|> head()
+subset(cntrl_top, class==2)|> head()
+subset(cntrl_top, class==3)|> head()
+subset(cntrl_top, class==4)|> head()
+```
+
+We can visualize segmentation by plotting one m/z value in the top five most positive t-statistics of each segment from the lists shown above. 
+```{r image-cntrl_ions_top, fig.height=6, fig.width=9,cache = TRUE}
+image(cntrl_tissue, mz=c(483.069,212.843, 465.023,348.868), 
+      tolerance=0.002, units="mz", enhance="hist",scale=TRUE,
+      col=matter::cpal("Cividis"))
+```
+
+We can also demonstrate that the localizations are the same for potassium phosphate and DHB with potassium phosphate. While these are not the analytes of interest that were expected, it shows that there is additional phosphate and potassium available in these regions of the tissue that are not present elsewhere in the plant. This region of the plant is often thicker than the outer edges of the fronds and could be the result of excess media present within the plant. Thus, an abundance of these analytes in particular can lead to cluster formation with the highly reactive DHB matrix.
+```{r image-cntrl_ions_phosphate, fig.height=4, fig.width=9,cache = TRUE}
+image(cntrl_tissue, mz=c(348.868, 212.852), 
+      tolerance=0.002, units="mz", enhance="hist",scale=TRUE,
+      col=matter::cpal("Cividis"))
+```
+
+We can compare the two intermediate/daughter regions obtained with the tape background (k=7) and without the tape background included in the SSC segmentation model (k=4).
+```{r image-cntrl_tstat_compare, fig.height=5, fig.width=9,cache = TRUE}
+# Without the tape background included in the model
+plot(cntrl_ssc_tissue_Mdl3, type = "statistic", key = FALSE, 
+     scale = TRUE, lwd = 2, select = c(2),
+     col=c("#F28E27"), annPeaks = 5)
+```
+```{r image-cntrl_tstat_top, cache = TRUE}
+subset(cntrl_top, class == 2) |> head()
+```
+
+```{r image-cntrl_tstat_compare2, fig.height=5, fig.width=9,cache = TRUE}
+# With the tape background included in the model
+plot(cntrl_nobkgrem_k7, type="statistic", key=FALSE,
+     scale=TRUE, lwd = 2, select = c(7),
+     col=c("#F28E27"), annPeaks = 5)
+```
+```{r, cache = TRUE}
+subset(nobkgrem_k7_top, class == 7) |> head()
+```
+
+While there are differences in the values of the t-statistics, there are no immediate differences between the analytes observed in these regions. Therefore, removing the tape background was not detrimental to the investigation of the tissue region and saved computational time. In the examples provided below, we continue removing the tape background prior to SSC segmentation of the tissue-only regions.
+
+## Two-Day 13C-Labeled Duckweed
+
+As with the unlabeled duckweed sample, the two-day 13-carbon (13C) duckweed was TIC normalized and processed. 
+```{r, eval = FALSE}
+twoA <- readMSIData("2dayA_13C_Realigned.imzML")
+
+twoA_normAlign <- twoA |>
+  normalize(method="tic") |>
+  peakProcess(tolerance=0.002, units="mz")
+
+twoA_normAlign <- twoA_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+
+Below, we plot average mass spectrum.
+```{r image-two_mean, fig.height=5, fig.width=9,cache = TRUE}
+plot(twoA_normAlign, "Mean", annPeaks=3)
+```
+
+SSC segmentation was used to separate the tape and tissue regions.
+```{r ,eval = FALSE }
+twoA_bkgdrem <- spatialShrunkenCentroids(twoA_normAlign, r = 3, k=3, s=0, 
+                                         weights = "gaussian")
+twoA_normAlign$regions <- makeFactor(
+  tissue = (twoA_bkgdrem@model[["class"]]!=3),
+  bkgd = (twoA_bkgdrem@model[["class"]]==3))
+```
+```{r image-two_regions, fig.height=4, fig.width=6,cache = TRUE}
+image(twoA_normAlign, "regions")
+```
+
+Below, the average mass spectrum for the tape background is shown.
+```{r image-two_bkgd_mean, fig.height=5, fig.width=9,cache = TRUE}
+twoA_bkgd <- subsetPixels(twoA_normAlign, regions=="bkgd")
+twoA_bkgd <- twoA_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(twoA_bkgd, "Mean", annPeaks=3)
+```
+
+We also plot the average mass spectrum of the tissue region. Here, isotope labeling can be observed more clearly. Two m/z values are annotated in the mass spectrum: MGDG 36:6 at 813.4909 and DGDG 36:6 at 975.5439. 
+```{r image-two_tissue_mean, fig.height=4, fig.width=9,cache = TRUE}
+twoA_tissue <- subsetPixels(twoA_normAlign, regions!="bkgd")
+twoA_tissue <- twoA_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(twoA_tissue, "Mean", annPeaks=2)
+```
+
+SSC segmentation of the tissue-only region can be performed and four main regions are observed.These regions are similar to that observed in the unlabeled dataset, but the intermediate and daughter frond regions are now separated and the budding pouch cannot be distinguished, likely due to the an insufficient mass range to observe metabolites in that region.  
+```{r, eval = FALSE }
+twoA_ssc_tissue <- spatialShrunkenCentroids(twoA_tissue, r = 1, k=4, s= 2^(0:5), 
+                                            weights = "gaussian")
+```
+```{r image-two_ssc,fig.height=6, fig.width=9,cache = TRUE}
+twoA_ssc_tissue
+image(twoA_ssc_tissue, i=1:6, col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+We select the s = 8  model for consistency and plot the t-statistics below. Clearly, the labeling distribution of MGDG 36:6 can be observed as having different localization throughout the tissue (observed in the distribution of cyan, red, and orange between m/z 813 and 860). We also see the labeling distributionof DGDG 36:6 following the same pattern between m/z 975 and 1025.
+```{r image-two_tstat, fig.height=4, fig.width=9,cache = TRUE}
+twoA_ssc_tissue_Mdl4 <- twoA_ssc_tissue[[4]]
+
+plot(twoA_ssc_tissue_Mdl4, type="statistic", key=FALSE, scale=TRUE, 
+     lwd=2, col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+Here, we plot the shrunken centroids where the intensities of the labeling distributions can be directly compared and are appropriately scaled.
+```{r image-two_cent, fig.height=4, fig.width=9,cache = TRUE}
+plot(twoA_ssc_tissue_Mdl4, type="centers", key=FALSE, scale=TRUE, 
+     lwd=2, col = c("#F28E27","#E05759","#59A14E","#76B7B2"))
+```
+
+From these observed isotopologue distribution we are able to define and annotate each segment.
+```{r image-two_anat, fig.height=4, fig.width=6,cache = TRUE}
+twoA_top <- topFeatures(twoA_ssc_tissue_Mdl4)
+twoA_tissue$anatomy <- makeFactor(
+  tissueEdge = (twoA_ssc_tissue_Mdl4@model[["class"]] == 3),
+  Daughter = (twoA_ssc_tissue_Mdl4@model[["class"]] == 1),
+  innerParent = (twoA_ssc_tissue_Mdl4@model[["class"]] == 2),
+  outerParent = twoA_ssc_tissue_Mdl4@model[["class"]] == 4)
+image(twoA_tissue, "anatomy",
+      col=c("#59A14E","#F28E27","#E05759","#76B7B2"))
+```
+
+## Three-Day 13C-Labeled Duckweed
+
+As with the unlabeled duckweed sample, the two-day 13-carbon (13C) duckweed was TIC normalized and processed. 
+```{r, eval = FALSE}
+threeC <-readMSIData("3dayC_13C_Realigned.imzML")
+centroided(threeC) <- FALSE
+
+threeC_normAlign <- threeC |>
+  normalize(method="tic") |> #TIC Normalization
+  peakProcess(tolerance=0.002, units="mz")
+
+threeC_normAlign<- threeC_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+Below, we plot the average mass spectrum for the mass spectrometry image.
+```{r iamge-three_mean, fig.height=5, fig.width=9,cache = TRUE}
+plot(threeC_normAlign, "Mean", annPeaks=3)
+```
+
+As with the previous two examples, we use SSC segmentation to remove the tape background.
+```{r, eval = FALSE }
+threeC_bkgdrem <- spatialShrunkenCentroids(threeC_normAlign, r = 2, k=3, s= 8, 
+                                           weights = "gaussian")
+
+threeC_normAlign$regions <- makeFactor(
+  tissue = (threeC_bkgdrem@model[["class"]]!=1),
+  bkgd = (threeC_bkgdrem@model[["class"]]==1))
+```
+```{r image-three_regions, fig.height=4, fig.width=6,cache = TRUE}
+image(threeC_normAlign, "regions")
+```
+
+Below, plot the average mass spectrum of the tape background region. It can be noted that there appears to be some minor contribution of delocalized isotopologues from the distributions shown in low abundance throughout the spectrum. However, the most abundant peaks are related to the tape or the matrix. 
+```{r image-three_bkgd_mean, fig.height=5, fig.width=9, cache=TRUE}
+threeC_bkgd <- subsetPixels(threeC_normAlign, regions == "bkgd")
+
+threeC_bkgd <- threeC_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(threeC_bkgd, "Mean", annPeaks=3)
+```
+
+From the average mass spectrum of the tissue region, the isotopologue distributions are much cleaner than when the two regions were combined.
+```{r image-three_tissue_mean, fig.height=5, fig.width=9,cache = TRUE}
+threeC_tissue <- subsetPixels(threeC_normAlign, regions == "tissue")
+
+threeC_tissue <- threeC_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(threeC_tissue, "Mean", annPeaks=2)
+```
+
+We perform SSC segmentation on the tissue region of the three-day 13C-labeled duckweed sample. Five segments are now observed that are similar to those observed in the unlabeled and two-day 13C-labeled examples. However, no tissue edge was observed and the daughter fronds are segmented into two regions like those observed in the parent frond. This is most likely because the daughter fronds in this sample are more matured than observed in the previous examples and were likely close to separating from the parent frond when they were harvested.
+```{r, eval = FALSE}
+threeC_ssc_tissue <- spatialShrunkenCentroids(threeC_tissue, 
+                                              r=2, k = 5, s= 2^(0:5), 
+                                              weights="gaussian")
+```
+```{r image- three_ssc, fig.height=6, fig.width=9,cache = TRUE}
+image(threeC_ssc_tissue, i = 1:6, key=FALSE, 
+      col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+We select the model with s = 8 as an example and plot the t-statistics. As with the two-day 13C-labeled example, the isotopologue distributions throughout the tissue can be observed for both MGDG 36:6 and DGDG 36:6.
+```{r image-three_tstat, fig.height=5, fig.width=9,cache = TRUE}
+threeC_ssc_tissue_Mdl4 <- threeC_ssc_tissue[[4]]
+plot(threeC_ssc_tissue_Mdl4, type = "statistic", lwd = 2, key=FALSE, 
+     col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+Then we show the shrunken centroids and compare them directly between the segments.
+```{r image-three_cent, fig.height=4, fig.width=9,cache = TRUE}
+plot(threeC_ssc_tissue_Mdl4, type = "centers", lwd = 2, scale = TRUE, key=FALSE, 
+     col = c("#E05759","#76B7B2","#F28E27","#EDC947","#B07AA1"))
+```
+
+We are able to extract the ranked t-statistics from this model and annotate the regions of the plant.
+```{r image-three_anat, fig.height=5, fig.width=6,cache = TRUE}
+threeC_top <- topFeatures(threeC_ssc_tissue_Mdl4)
+
+threeC_tissue$anatomy <- makeFactor(
+  innerDaughter = (threeC_ssc_tissue_Mdl4@model[["class"]] == 3),
+  outerDaughter = (threeC_ssc_tissue_Mdl4@model[["class"]] == 4),
+  innerParent = (threeC_ssc_tissue_Mdl4@model[["class"]] == 1),
+  buddingPouch = (threeC_ssc_tissue_Mdl4@model[["class"]] == 5),
+  outerParent = threeC_ssc_tissue_Mdl4@model[["class"]] == 2)
+image(threeC_tissue, "anatomy",
+      col=c("#F28E27","#EDC947","#E05759","#B07AA1","#76B7B2"))
+
+```
+
+## Five-Day D-Labeled Duckweed
+
+Here, we break down the analysis of deuterium(D)-labeled duckweed samples into two parts: the lipid mass range (800-1200) and the whole mass range (100-1200). We start by normalizing the data and binning with a mass tolerance of 2 mDa. We turn off peak filtering to ensure that even the low intensity peaks are preserved. The same dominant peaks can be observed in this mass spectrum as those shown in the unlabeled duckweed example.
+```{r, eval = FALSE}
+fiveB <-readMSIData("5dayB_2H.imzML")
+
+fiveB_normAlign<- fiveB|>
+  normalize(method="tic") |> #TIC Normalization
+  peakProcess(tolerance=0.002, units="mz", filterFreq = 0)
+
+fiveB_normAlign <- fiveB_normAlign |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+```{r image- five_mean, fig.height=5, fig.width=9,cache = TRUE}
+plot(fiveB_normAlign, "Mean", annPeaks = 2)
+```
+
+Below, the TIC image of the deuterium labeled sample.
+```{r image-five_TIC, fig.height=4, fig.width=6,cache = TRUE}
+image(fiveB_normAlign, "TIC", enhance="hist", col=matter::cpal("Cividis"))
+```
+
+### Lipid Analysis
+
+We create a subset for the desired mass range, re-normalize, and plot the mean mass spectrum.
+```{r image-five_lip_mean, fig.height=5, fig.width=9,cache = TRUE}
+fiveB_lipids <- subsetFeatures(fiveB_normAlign, 800 < mz, mz < 1200)
+fiveB_lipids <- normalize(fiveB_lipids, method="tic")|>
+  process()
+
+fiveB_lipids <- fiveB_lipids |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+
+plot(fiveB_lipids, "Mean", annPeaks = 2)
+```
+
+We, again, use SSC segmentation to find the tissue region and separate it from the background.
+```{r, eval =FALSE}
+fiveB_lipids_ssc <- spatialShrunkenCentroids(fiveB_lipids, r = 2, k = 2 
+                                                s = 0, weights = "gaussian")
+fiveB_lipids_ssc
+fiveB_lipids$regions <- makeFactor(tissue = (fiveB_lipids_ssc@model[["class"]]!=1),
+                                  bkgd = (fiveB_lipids_ssc@model[["class"]]==1))
+```
+```{r image-five_lip_regions, fig.height=4, fig.width=6,cache = TRUE}
+image(fiveB_lipids,"regions")
+```
+
+Below, we plot the mean mass spectrum of the tape background for m/z 800-1200.
+```{r image-five_lip_bkgd_mean, fig.height=5, fig.width=9,cache = TRUE}
+fiveB_bkgd_lipids <- subsetPixels(fiveB_lipids, regions == "bkgd")
+fiveB_bkgd_lipids <- fiveB_bkgd_lipids |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_bkgd_lipids, "Mean", annPeaks = 2)
+```
+
+We perform SSC segmentation on the tissue-only pixels and plot the t-statistics showing the differences between the two regions. Here, it is hard to grasp the extent of the isotope labeling because many peaks have been shrunk toward zero. This implies that there are not many differences between what we discern as the parent and daughter frond regions for this mass range.
+```{r, fig.height=4, fig.width=6,cache = TRUE}
+fiveB_tissue_lipids <- subsetPixels(fiveB_lipids, regions == "tissue")
+fiveB_tissue_lipids_ssc <- spatialShrunkenCentroids(fiveB_tissue_lipids, r=3, 
+                                            k = 2, s=8, 
+                                            weights="gaussian")
+image(fiveB_tissue_lipids_ssc, col=c("#76B7B2","#F28E27"))
+```
+```{r image-five_lip_tstat, fig.height=4, fig.width=6,cache = TRUE}
+fiveB_lipid_top <- topFeatures(fiveB_tissue_lipids_ssc)
+plot(fiveB_tissue_lipids_ssc, type="statistic",lwd = 2,
+     col=c("#76B7B2","#F28E27"), key = FALSE)
+```
+
+We also show the differences in shrunken centroids.
+```{r image-five_lip_cent, fig.height=4, fig.width=6,cache = TRUE}
+plot(fiveB_tissue_lipids_ssc, type="centers",lwd = 2,
+     col=c("#76B7B2","#F28E27"), key =FALSE)
+```
+
+Finally, we annotate the two regions as parent and daughter.
+
+```{r image-five_lip_anat, fig.height=4, fig.width=6,cache = TRUE}
+fiveB_tissue_lipids$anatomy <- makeFactor(
+  Parent = (fiveB_tissue_lipids_ssc@model[["class"]] == 1),
+  Daughter = (fiveB_tissue_lipids_ssc@model[["class"]] == 2))
+image(fiveB_tissue_lipids, "anatomy", col=c("#76B7B2","#F28E27"))
+```
+
+### Whole Mass Range Analysis
+
+We use the intital segmentation from the higher mass range to select the tissue and background regions of the entire mass range. Below, the mean mass spectrum for the background.
+
+```{r, eval = FALSE}
+fiveB_normAlign$regions <- makeFactor(tissue = (fiveB_lipids_ssc@model[["class"]]!=1),
+                                  bkgd = (fiveB_lipids_ssc@model[["class"]]==1))
+fiveB_tissue <- subsetPixels(fiveB_normAlign, regions == "tissue")
+fiveB_bkgd <- subsetPixels(fiveB_normAlign, regions == "bkgd")
+
+fiveB_bkgd <- fiveB_bkgd |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+```
+```{r image-five_bkgd_mean, fig.height=5, fig.width=9,cache = TRUE}
+plot(fiveB_bkgd, "Mean", annPeaks = 2)
+```
+
+Here, we plot the mean mass spectrum of the tissue region. Unlike the 13-carbon labeled samples, the isotope labeling is much harder to distinguish from the high intensity chemical noise peaks.
+
+```{r image-five_tissue_mean, fig.height=4, fig.width=9,cache = TRUE}
+fiveB_tissue <- fiveB_tissue |>
+  summarizePixels(c(TIC="sum")) |>
+  summarizeFeatures(c(Mean = "mean"))
+plot(fiveB_tissue, "Mean", annPeaks = 2)
+```
+
+We perform SSC segmentation on the tissue region of the dataset and show the results of all six models.
+
+```{r, eval = FALSE}
+fiveB_tissue_ssc <- spatialShrunkenCentroids(fiveB_tissue, r=3, k=5, s=2^(0:4), 
+                                             weights="adaptive")
+```
+```{r image-five_tissue_ssc, fig.height=6, fig.width=9,cache = TRUE}
+image(fiveB_tissue_ssc, i = 1:5, 
+      col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27"))
+```
+
+After selecting the model with s = 8 as an example, we plot the t-statistics.
+
+```{r image-five_tstat, fig.height=6, fig.width=9,cache = TRUE}
+fiveB_tissue_Mdl4 <- fiveB_tissue_ssc[[4]]
+fiveB_tissue_top <- topFeatures(fiveB_tissue_Mdl4)
+
+plot(fiveB_tissue_Mdl4, type="statistic", lwd = 2, key = FALSE, 
+     col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27") )
+```
+
+We also provide the shrunken centroids.
+
+```{r image-five_cent, fig.height=6, fig.width=9,cache = TRUE}
+plot(fiveB_tissue_Mdl4, type="centers", lwd = 2, key = FALSE, 
+     col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27") )
+```
+
+Here, we annotate the five detected regions.
+
+```{r image-five_anat, fig.height=4, fig.width=6,cache = TRUE}
+fiveB_tissue$anatomy <- makeFactor(
+  tissueEdge = (fiveB_tissue_Mdl4@model[["class"]] == 1),
+  outerParent = (fiveB_tissue_Mdl4@model[["class"]] == 2),
+  buddingPouch = (fiveB_tissue_Mdl4@model[["class"]] == 3),
+  innerParent = (fiveB_tissue_Mdl4@model[["class"]] == 4),
+  Daughter = (fiveB_tissue_Mdl4@model[["class"]] == 5))
+image(fiveB_tissue, "anatomy",
+      col=c("#59A14E","#76B7B2","#B07AA1","#E05759","#F28E27"))
+```
+
+## Session information
+
+```{r}
+sessionInfo()
+```
